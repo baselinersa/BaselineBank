@@ -1,0 +1,781 @@
+
+{% extends "admin/base_site.html" %}
+
+{% block title %}
+Baseline Bank Administration
+{% endblock %}
+
+{% block branding %}
+<h1 id="site-name">
+    🏦 Baseline Bank Administration
+</h1>
+{% endblock %}
+
+{% block content %}
+
+<style>
+
+    .baseline-dashboard {
+        padding: 10px 0 30px 0;
+    }
+
+    /* =====================================================
+       HEADER
+    ===================================================== */
+
+    .dashboard-header {
+        margin-bottom: 25px;
+    }
+
+    .dashboard-header h2 {
+        font-size: 30px;
+        margin: 0 0 8px 0;
+    }
+
+    .dashboard-header p {
+        margin: 0;
+        color: #6b7280;
+        font-size: 14px;
+    }
+
+
+    /* =====================================================
+       STAT CARDS
+    ===================================================== */
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(4, minmax(180px, 1fr));
+        gap: 18px;
+        margin-bottom: 25px;
+    }
+
+    .stat-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 20px;
+        box-shadow:
+            0 3px 12px rgba(0, 0, 0, 0.06);
+        transition: transform 0.2s ease,
+                    box-shadow 0.2s ease;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-3px);
+        box-shadow:
+            0 8px 20px rgba(0, 0, 0, 0.10);
+    }
+
+    .stat-icon {
+        font-size: 28px;
+        margin-bottom: 12px;
+    }
+
+    .stat-label {
+        color: #6b7280;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+
+    .stat-value {
+        font-size: 25px;
+        font-weight: 700;
+        color: #111827;
+    }
+
+    .stat-subtitle {
+        margin-top: 7px;
+        font-size: 12px;
+        color: #9ca3af;
+    }
+
+
+    /* =====================================================
+       FINANCIAL CARDS
+    ===================================================== */
+
+    .finance-grid {
+        display: grid;
+        grid-template-columns:
+            repeat(3, minmax(220px, 1fr));
+        gap: 18px;
+        margin-bottom: 25px;
+    }
+
+    .finance-card {
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 24px;
+        border: 1px solid #e5e7eb;
+        box-shadow:
+            0 3px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .finance-card h3 {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        color: #6b7280;
+    }
+
+    .finance-amount {
+        font-size: 28px;
+        font-weight: 700;
+        color: #111827;
+    }
+
+
+    /* =====================================================
+       TRANSACTION SUMMARY
+    ===================================================== */
+
+    .transaction-summary {
+        display: grid;
+        grid-template-columns:
+            repeat(3, minmax(180px, 1fr));
+        gap: 18px;
+        margin-bottom: 25px;
+    }
+
+    .transaction-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 20px;
+        box-shadow:
+            0 3px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .transaction-card h3 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        color: #6b7280;
+    }
+
+    .transaction-amount {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+
+    .transaction-count {
+        font-size: 12px;
+        color: #9ca3af;
+    }
+
+
+    /* =====================================================
+       DASHBOARD SECTION
+    ===================================================== */
+
+    .dashboard-section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 25px;
+        box-shadow:
+            0 3px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .dashboard-section h2 {
+        margin: 0 0 6px 0;
+        font-size: 20px;
+    }
+
+    .dashboard-section-description {
+        color: #6b7280;
+        font-size: 13px;
+        margin-bottom: 20px;
+    }
+
+
+    /* =====================================================
+       QUICK ACCESS
+    ===================================================== */
+
+    .quick-links {
+        display: grid;
+        grid-template-columns:
+            repeat(3, minmax(180px, 1fr));
+        gap: 15px;
+    }
+
+    .quick-link {
+        display: block;
+        padding: 18px;
+        border-radius: 10px;
+        background: #f3f4f6;
+        text-decoration: none;
+        color: #111827;
+        font-weight: 600;
+        transition: 0.2s ease;
+    }
+
+    .quick-link:hover {
+        background: #e5e7eb;
+        transform: translateY(-2px);
+    }
+
+
+    /* =====================================================
+       RECENT TRANSACTIONS
+    ===================================================== */
+
+    .transaction-table-wrapper {
+        overflow-x: auto;
+    }
+
+    .transaction-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+    .transaction-table th {
+        text-align: left;
+        padding: 12px;
+        background: #f9fafb;
+        color: #6b7280;
+        font-weight: 600;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .transaction-table td {
+        padding: 13px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        color: #374151;
+    }
+
+    .transaction-table tr:hover {
+        background: #f9fafb;
+    }
+
+    .amount {
+        font-weight: 700;
+    }
+
+
+    /* =====================================================
+       LOW BALANCE ALERT
+    ===================================================== */
+
+    .alert-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        padding: 18px 20px;
+        border-radius: 12px;
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        margin-bottom: 25px;
+    }
+
+    .alert-title {
+        font-weight: 700;
+        color: #9a3412;
+        margin-bottom: 4px;
+    }
+
+    .alert-text {
+        font-size: 13px;
+        color: #c2410c;
+    }
+
+    .alert-number {
+        font-size: 25px;
+        font-weight: 700;
+        color: #c2410c;
+    }
+
+
+    /* =====================================================
+       RESPONSIVE
+    ===================================================== */
+
+    @media (max-width: 1100px) {
+
+        .stats-grid {
+            grid-template-columns:
+                repeat(2, 1fr);
+        }
+
+        .finance-grid {
+            grid-template-columns:
+                repeat(2, 1fr);
+        }
+
+        .transaction-summary {
+            grid-template-columns:
+                repeat(2, 1fr);
+        }
+
+    }
+
+
+    @media (max-width: 700px) {
+
+        .stats-grid,
+        .finance-grid,
+        .transaction-summary,
+        .quick-links {
+            grid-template-columns: 1fr;
+        }
+
+        .dashboard-section {
+            padding: 18px;
+        }
+
+        .dashboard-header h2 {
+            font-size: 24px;
+        }
+
+    }
+
+</style>
+
+
+<div class="baseline-dashboard">
+
+
+    <!-- =====================================================
+         DASHBOARD HEADER
+    ====================================================== -->
+
+    <div class="dashboard-header">
+
+        <h2>
+            🏦 Baseline Bank Dashboard
+        </h2>
+
+        <p>
+            Monitor Customers, Accounts, Funds And Banking Activity.
+        </p>
+
+    </div>
+
+
+    <!-- =====================================================
+         MAIN STATISTICS
+    ====================================================== -->
+
+    <div class="stats-grid">
+
+
+        <div class="stat-card">
+
+            <div class="stat-icon">
+                👥
+            </div>
+
+            <div class="stat-label">
+                Total Customers
+            </div>
+
+            <div class="stat-value">
+                {{ user_count }}
+            </div>
+
+            <div class="stat-subtitle">
+                Registered Customers
+            </div>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <div class="stat-icon">
+                🟢
+            </div>
+
+            <div class="stat-label">
+                Active Customers
+            </div>
+
+            <div class="stat-value">
+                {{ active_user_count }}
+            </div>
+
+            <div class="stat-subtitle">
+                Currently Active
+            </div>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <div class="stat-icon">
+                🏦
+            </div>
+
+            <div class="stat-label">
+                Bank Accounts
+            </div>
+
+            <div class="stat-value">
+                {{ account_count }}
+            </div>
+
+            <div class="stat-subtitle">
+                Customer Accounts
+            </div>
+
+        </div>
+
+
+        <div class="stat-card">
+
+            <div class="stat-icon">
+                🧾
+            </div>
+
+            <div class="stat-label">
+                Transactions
+            </div>
+
+            <div class="stat-value">
+                {{ transaction_count }}
+            </div>
+
+            <div class="stat-subtitle">
+                All-Time Transactions
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         FINANCIAL OVERVIEW
+    ====================================================== -->
+
+    <div class="finance-grid">
+
+
+        <div class="finance-card">
+
+            <h3>
+                💰 Main Account Funds
+            </h3>
+
+            <div class="finance-amount">
+                R {{ main_total|floatformat:2 }}
+            </div>
+
+        </div>
+
+
+        <div class="finance-card">
+
+            <h3>
+                💎 Savings Funds
+            </h3>
+
+            <div class="finance-amount">
+                R {{ savings_total|floatformat:2 }}
+            </div>
+
+        </div>
+
+
+        <div class="finance-card">
+
+            <h3>
+                💵 Total Bank Funds
+            </h3>
+
+            <div class="finance-amount">
+                R {{ total_funds|floatformat:2 }}
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         TRANSACTION OVERVIEW
+    ====================================================== -->
+
+    <div class="dashboard-section">
+
+        <h2>
+            💳 Transaction Overview
+        </h2>
+
+        <div class="dashboard-section-description">
+            Summary Of Banking Activity Across The System.
+        </div>
+
+
+        <div class="transaction-summary">
+
+
+            <div class="transaction-card">
+
+                <h3>
+                    📥 Deposits
+                </h3>
+
+                <div class="transaction-amount">
+                    R {{ deposit_total|floatformat:2 }}
+                </div>
+
+                <div class="transaction-count">
+                    {{ deposit_count }} Transactions
+                </div>
+
+            </div>
+
+
+            <div class="transaction-card">
+
+                <h3>
+                    📤 Withdrawals
+                </h3>
+
+                <div class="transaction-amount">
+                    R {{ withdrawal_total|floatformat:2 }}
+                </div>
+
+                <div class="transaction-count">
+                    {{ withdrawal_count }} Transactions
+                </div>
+
+            </div>
+
+
+            <div class="transaction-card">
+
+                <h3>
+                    🔄 Transfers
+                </h3>
+
+                <div class="transaction-amount">
+                    R {{ transfer_total|floatformat:2 }}
+                </div>
+
+                <div class="transaction-count">
+                    {{ transfer_count }} Transactions
+                </div>
+
+            </div>
+
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         LOW BALANCE ALERT
+    ====================================================== -->
+
+    {% if low_balance_count > 0 %}
+
+    <div class="alert-card">
+
+        <div>
+
+            <div class="alert-title">
+                ⚠️ Low Balance Alert
+            </div>
+
+            <div class="alert-text">
+                {{ low_balance_count }}
+                Account{{ low_balance_count|pluralize }}
+                Have A Balance Below R 200.00.
+            </div>
+
+        </div>
+
+        <div class="alert-number">
+            {{ low_balance_count }}
+        </div>
+
+    </div>
+
+    {% endif %}
+
+
+    <!-- =====================================================
+         RECENT TRANSACTIONS
+    ====================================================== -->
+
+    <div class="dashboard-section">
+
+        <h2>
+            📋 Recent Transactions
+        </h2>
+
+        <div class="dashboard-section-description">
+            Latest Banking Activity.
+        </div>
+
+
+        <div class="transaction-table-wrapper">
+
+            <table class="transaction-table">
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            ID
+                        </th>
+
+                        <th>
+                            Customer
+                        </th>
+
+                        <th>
+                            Transaction
+                        </th>
+
+                        <th>
+                            Account
+                        </th>
+
+                        <th>
+                            Amount
+                        </th>
+
+                        <th>
+                            Date
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% for transaction in recent_transactions %}
+
+                    <tr>
+
+                        <td>
+                            #{{ transaction.id }}
+                        </td>
+
+                        <td>
+                            {{ transaction.bank_account.user.username }}
+                        </td>
+
+                        <td>
+                            {{ transaction.transaction_type|title }}
+                        </td>
+
+                        <td>
+                            {{ transaction.account_type|title }}
+                        </td>
+
+                        <td class="amount">
+                            R {{ transaction.amount|floatformat:2 }}
+                        </td>
+
+                        <td>
+                            {{ transaction.timestamp|date:"d M Y, H:i" }}
+                        </td>
+
+                    </tr>
+
+                    {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+                            No Transactions Found.
+                        </td>
+
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         QUICK ACCESS
+    ====================================================== -->
+
+    <div class="dashboard-section">
+
+        <h2>
+            ⚡ Quick Access
+        </h2>
+
+        <div class="dashboard-section-description">
+            Quickly Manage Your Baseline Bank Data.
+        </div>
+
+
+        <div class="quick-links">
+
+
+            <a
+                href="{% url 'baseline_admin:accounts_bankaccount_changelist' %}"
+                class="quick-link"
+            >
+                🏦 Manage Bank Accounts
+            </a>
+
+
+            <a
+                href="{% url 'baseline_admin:accounts_transaction_changelist' %}"
+                class="quick-link"
+            >
+                🧾 View Transactions
+            </a>
+
+
+            <a
+                href="{% url 'baseline_admin:auth_user_changelist' %}"
+                class="quick-link"
+            >
+                👥 Manage Customers
+            </a>
+
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         DEFAULT ADMIN APPLICATIONS
+    ====================================================== -->
+
+    <div class="dashboard-section">
+
+        <h2>
+            🛠️ Administration
+        </h2>
+
+        <div class="dashboard-section-description">
+            Manage The Core Baseline Bank System.
+        </div>
+
+        {{ block.super }}
+
+    </div>
+
+
+</div>
+
+{% endblock %}
+
