@@ -402,10 +402,6 @@ export default function AIAssistant() {
   };
 
   // =========================================================
-  // NATURAL-LANGUAGE BANKING INTELLIGENCE
-  // =========================================================
-
-  // =========================================================
   // AFFORDABILITY
   // =========================================================
 
@@ -941,7 +937,10 @@ export default function AIAssistant() {
         normalized
       );
 
-    // Savings -> Main
+    // =======================================================
+    // SAVINGS -> MAIN
+    // =======================================================
+
     if (
       hasSavings &&
       hasMain &&
@@ -962,11 +961,14 @@ export default function AIAssistant() {
     ) {
       return {
         amount,
-        direction: "savings_to_main",
+        direction: "to_main",
       };
     }
 
-    // Main -> Savings
+    // =======================================================
+    // MAIN -> SAVINGS
+    // =======================================================
+
     if (
       hasSavings &&
       hasMain &&
@@ -986,14 +988,17 @@ export default function AIAssistant() {
       )
     ) {
       return {
-  amount,
-  fromAccount: "main",
-  toAccount: "savings",
-  direction: "to_savings",
-};
+        amount,
+        fromAccount: "main",
+        toAccount: "savings",
+        direction: "to_savings",
+      };
     }
 
-    // Move To Savings Without Explicit Source
+    // =======================================================
+    // MOVE TO SAVINGS WITHOUT EXPLICIT SOURCE
+    // =======================================================
+
     if (
       !hasMain &&
       /\b(?:to|into)\s+(?:my\s+)?savings?\b/i.test(
@@ -1002,11 +1007,14 @@ export default function AIAssistant() {
     ) {
       return {
         amount,
-        direction: "main_to_savings",
+        direction: "to_savings",
       };
     }
 
-    // Move To Main Without Explicit Source
+    // =======================================================
+    // MOVE TO MAIN WITHOUT EXPLICIT SOURCE
+    // =======================================================
+
     if (
       !hasSavings &&
       /\b(?:to|into)\s+(?:my\s+)?main\b/i.test(
@@ -1015,7 +1023,7 @@ export default function AIAssistant() {
     ) {
       return {
         amount,
-        direction: "savings_to_main",
+        direction: "to_main",
       };
     }
 
@@ -1033,10 +1041,14 @@ export default function AIAssistant() {
     return (
       normalized.startsWith("deposit ") ||
       normalized.includes("deposit ") ||
-      normalized.includes("put ") &&
-        normalized.includes("into ") ||
-      normalized.includes("add ") &&
+      (
+        normalized.includes("put ") &&
+        normalized.includes("into ")
+      ) ||
+      (
+        normalized.includes("add ") &&
         normalized.includes("to ")
+      )
     );
   };
 
@@ -1238,8 +1250,7 @@ export default function AIAssistant() {
       });
 
       const directionText =
-        transfer.direction ===
-        "main_to_savings"
+        transfer.direction === "to_savings"
           ? "Main Account → Savings"
           : "Savings → Main Account";
 
@@ -1473,9 +1484,12 @@ export default function AIAssistant() {
         direction,
       } = interAccountTransfer;
 
+      // Backend accepts exactly:
+      // "to_savings"
+      // "to_main"
+
       const isMainToSavings =
-        direction ===
-        "main_to_savings";
+        direction === "to_savings";
 
       const sourceBalance =
         isMainToSavings
