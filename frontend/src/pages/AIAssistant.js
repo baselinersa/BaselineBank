@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
 import API from "../api";
+
 import Navbar from "../components/Navbar";
 
 export default function AIAssistant() {
@@ -16,18 +18,30 @@ export default function AIAssistant() {
     {
       sender: "ai",
       text:
-        "Hello! 👋 I'm Your Baseline Bank AI Assistant. Ask Me About Your Balance, Savings, Spending, Income, Transactions, Transfers, Deposits, Withdrawals, Or Your Financial Health.",
+        "Hello! 👋 I'm Your Baseline Bank AI Assistant. Ask Me About Your Balance, Savings, Spending, Income, Transactions, Transfers, Deposits, Withdrawals, Beneficiaries, Airtime, Electricity, Bills, Or Your Financial Health.",
     },
   ]);
 
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+const [speechSupported, setSpeechSupported] = useState(true);
+
+const recognitionRef = useRef(null);
 
   const [pendingTransfer, setPendingTransfer] = useState(null);
   const [pendingDeposit, setPendingDeposit] = useState(null);
   const [pendingWithdrawal, setPendingWithdrawal] = useState(null);
   const [pendingInterAccountTransfer, setPendingInterAccountTransfer] =
     useState(null);
+
+  // =========================================================
+  // PAYMENT INFORMATION
+  // =========================================================
+
+  const [pendingAirtime, setPendingAirtime] = useState(null);
+  const [pendingElectricity, setPendingElectricity] = useState(null);
+  const [pendingBill, setPendingBill] = useState(null);
 
   // =========================================================
   // FORMAT MONEY
@@ -43,6 +57,35 @@ export default function AIAssistant() {
     return number.toLocaleString("en-ZA", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
+    });
+  };
+
+  // =========================================================
+  // FORMAT DATE
+  // =========================================================
+
+  const formatTransactionDate = (transaction) => {
+    const dateValue =
+      transaction?.timestamp ??
+      transaction?.created_at ??
+      transaction?.createdAt ??
+      transaction?.date;
+
+    if (!dateValue) {
+      return "";
+    }
+
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+
+    return date.toLocaleDateString("en-ZA", {
+      timeZone: "Africa/Johannesburg",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
     });
   };
 
@@ -78,11 +121,10 @@ export default function AIAssistant() {
           0
       );
 
-      console.log("AI MAIN BALANCE:", newMainBalance);
-      console.log("AI SAVINGS BALANCE:", newSavingsBalance);
-
       setMainBalance(
-        Number.isFinite(newMainBalance) ? newMainBalance : 0
+        Number.isFinite(newMainBalance)
+          ? newMainBalance
+          : 0
       );
 
       setSavingsBalance(
@@ -120,6 +162,60 @@ export default function AIAssistant() {
     }
   };
 
+
+  useEffect(() => {
+  const SpeechRecognition =
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    setSpeechSupported(false);
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  // South African English
+  recognition.lang = "en-ZA";
+
+  recognition.onstart = () => {
+    setIsListening(true);
+  };
+
+  recognition.onresult = (event) => {
+    const transcript =
+      event.results?.[0]?.[0]?.transcript || "";
+
+    if (transcript.trim()) {
+      setInput(transcript.trim());
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error("VOICE INPUT ERROR:", event.error);
+    setIsListening(false);
+  };
+
+  recognition.onend = () => {
+    setIsListening(false);
+  };
+
+  recognitionRef.current = recognition;
+
+  return () => {
+    try {
+      recognition.stop();
+    } catch (error) {
+      // Recognition may already be stopped.
+    }
+
+    recognitionRef.current = null;
+  };
+}, []);
+
   // =========================================================
   // INITIAL LOAD
   // =========================================================
@@ -130,21 +226,12 @@ export default function AIAssistant() {
 
   // =========================================================
   // AMOUNT EXTRACTION
-  // Supports:
-  // 500
-  // 500.50
-  // R500
-  // R 500
-  // 2k
-  // 2.5k
-  // R2k
-  // R 2.5k
-  // R2,000
-  // R 2,000
   // =========================================================
 
-  const extractAmount = (text) => {
-    if (!text) return null;
+    const extractAmount = (text) => {
+    if (!text) {
+      return null;
+    }
 
     const normalized = String(text)
       .toLowerCase()
@@ -153,7 +240,7 @@ export default function AIAssistant() {
       .trim();
 
     const match = normalized.match(
-      /(?:r\s*)?(\d+(?:\.\d+)?)\s*(k)?\b/i
+      /\br?\s*(\d+(?:\.\d+)?)\s*(k)?\b/i
     );
 
     if (!match) {
@@ -197,7 +284,9 @@ export default function AIAssistant() {
         0
     );
 
-    return Number.isFinite(amount) ? amount : 0;
+    return Number.isFinite(amount)
+      ? amount
+      : 0;
   };
 
   const getTransactionType = (transaction) => {
@@ -215,8 +304,18 @@ export default function AIAssistant() {
         transaction?.details ??
         transaction?.narration ??
         transaction?.merchant ??
+        transaction?.recipient ??
         ""
     );
+  };
+
+  const getTransactionAccount = (transaction) => {
+    return String(
+      transaction?.account_type ??
+        transaction?.accountType ??
+        transaction?.account ??
+        ""
+    ).toLowerCase();
   };
 
   // =========================================================
@@ -225,9 +324,11 @@ export default function AIAssistant() {
 
   const isInternalTransfer = (transaction) => {
     const description =
-      getTransactionDescription(transaction).toLowerCase();
+      getTransactionDescription(transaction)
+        .toLowerCase();
 
-    const type = getTransactionType(transaction);
+    const type =
+      getTransactionType(transaction);
 
     return (
       description.includes("savings → main") ||
@@ -251,7 +352,8 @@ export default function AIAssistant() {
   // =========================================================
 
   const isExpenseTransaction = (transaction) => {
-    const type = getTransactionType(transaction);
+    const type =
+      getTransactionType(transaction);
 
     return (
       type.includes("withdraw") ||
@@ -267,7 +369,8 @@ export default function AIAssistant() {
   };
 
   const isIncomeTransaction = (transaction) => {
-    const type = getTransactionType(transaction);
+    const type =
+      getTransactionType(transaction);
 
     return (
       type.includes("deposit") ||
@@ -308,6 +411,62 @@ export default function AIAssistant() {
         if (
           date.getMonth() !== now.getMonth() ||
           date.getFullYear() !== now.getFullYear()
+        ) {
+          return total;
+        }
+
+        if (
+          !isExpenseTransaction(transaction) ||
+          isInternalTransfer(transaction)
+        ) {
+          return total;
+        }
+
+        return (
+          total +
+          getTransactionAmount(transaction)
+        );
+      },
+      0
+    );
+  };
+
+  const getPreviousMonthSpending = () => {
+    if (!Array.isArray(transactions)) {
+      return 0;
+    }
+
+    const now = new Date();
+
+    let month = now.getMonth() - 1;
+    let year = now.getFullYear();
+
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+
+    return transactions.reduce(
+      (total, transaction) => {
+        const dateValue =
+          transaction?.timestamp ??
+          transaction?.created_at ??
+          transaction?.createdAt ??
+          transaction?.date;
+
+        if (!dateValue) {
+          return total;
+        }
+
+        const date = new Date(dateValue);
+
+        if (Number.isNaN(date.getTime())) {
+          return total;
+        }
+
+        if (
+          date.getMonth() !== month ||
+          date.getFullYear() !== year
         ) {
           return total;
         }
@@ -379,24 +538,24 @@ export default function AIAssistant() {
       return null;
     }
 
-    const expenses = transactions.filter(
-      (transaction) =>
-        isExpenseTransaction(transaction) &&
-        !isInternalTransfer(transaction) &&
-        getTransactionAmount(transaction) > 0
-    );
+    const expenses =
+      transactions.filter(
+        (transaction) =>
+          isExpenseTransaction(transaction) &&
+          !isInternalTransfer(transaction) &&
+          getTransactionAmount(transaction) > 0
+      );
 
     if (expenses.length === 0) {
       return null;
     }
 
     return expenses.reduce(
-      (largest, current) => {
-        return getTransactionAmount(current) >
-          getTransactionAmount(largest)
+      (largest, current) =>
+        getTransactionAmount(current) >
+        getTransactionAmount(largest)
           ? current
-          : largest;
-      },
+          : largest,
       expenses[0]
     );
   };
@@ -406,7 +565,8 @@ export default function AIAssistant() {
   // =========================================================
 
   const isAffordabilityCommand = (text) => {
-    const normalized = text.trim().toLowerCase();
+    const normalized =
+      text.trim().toLowerCase();
 
     return (
       normalized.includes("can i afford") ||
@@ -427,9 +587,8 @@ export default function AIAssistant() {
       );
     }
 
-    const availableBalance = Number(
-      mainBalance || 0
-    );
+    const availableBalance =
+      Number(mainBalance || 0);
 
     const remainingBalance =
       availableBalance - amount;
@@ -462,7 +621,9 @@ export default function AIAssistant() {
         availableBalance
       )}\n` +
       `💸 Required: R ${formatMoney(amount)}\n` +
-      `⚠️ Short By: R ${formatMoney(shortfall)}.`
+      `⚠️ Short By: R ${formatMoney(
+        shortfall
+      )}.`
     );
   };
 
@@ -471,7 +632,8 @@ export default function AIAssistant() {
   // =========================================================
 
   const getSpendingCategory = (transaction) => {
-    const type = getTransactionType(transaction);
+    const type =
+      getTransactionType(transaction);
 
     const description =
       getTransactionDescription(transaction)
@@ -601,33 +763,15 @@ export default function AIAssistant() {
       text.trim().toLowerCase();
 
     return (
-      normalized.includes(
-        "where am i spending"
-      ) ||
-      normalized.includes(
-        "what do i spend the most"
-      ) ||
-      normalized.includes(
-        "what am i spending the most"
-      ) ||
-      normalized.includes(
-        "biggest spending category"
-      ) ||
-      normalized.includes(
-        "largest spending category"
-      ) ||
-      normalized.includes(
-        "where does my money go"
-      ) ||
-      normalized.includes(
-        "what category do i spend the most"
-      ) ||
-      normalized.includes(
-        "what do i spend most on"
-      ) ||
-      normalized.includes(
-        "what am i spending most on"
-      )
+      normalized.includes("where am i spending") ||
+      normalized.includes("what do i spend the most") ||
+      normalized.includes("what am i spending the most") ||
+      normalized.includes("biggest spending category") ||
+      normalized.includes("largest spending category") ||
+      normalized.includes("where does my money go") ||
+      normalized.includes("what category do i spend the most") ||
+      normalized.includes("what do i spend most on") ||
+      normalized.includes("what am i spending most on")
     );
   };
 
@@ -664,6 +808,138 @@ export default function AIAssistant() {
   };
 
   // =========================================================
+  // SPECIFIC CATEGORY SPENDING
+  // =========================================================
+
+  const getCategoryFromText = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    if (normalized.includes("airtime")) {
+      return "Airtime";
+    }
+
+    if (
+      normalized.includes("electricity") ||
+      normalized.includes("eskom")
+    ) {
+      return "Electricity";
+    }
+
+    if (
+      normalized.includes("bills") ||
+      normalized.includes("bill")
+    ) {
+      return "Bills";
+    }
+
+    if (
+      normalized.includes("food") ||
+      normalized.includes("groceries") ||
+      normalized.includes("restaurant") ||
+      normalized.includes("takeaway")
+    ) {
+      return "Food";
+    }
+
+    if (
+      normalized.includes("shopping") ||
+      normalized.includes("clothing") ||
+      normalized.includes("mall")
+    ) {
+      return "Shopping";
+    }
+
+    if (
+      normalized.includes("withdrawal") ||
+      normalized.includes("withdrawals") ||
+      normalized.includes("cash")
+    ) {
+      return "Cash Withdrawals";
+    }
+
+    if (
+      normalized.includes("payment") ||
+      normalized.includes("payments")
+    ) {
+      return "Payments";
+    }
+
+    if (
+      normalized.includes("transfer") ||
+      normalized.includes("transfers")
+    ) {
+      return "Transfers";
+    }
+
+    return null;
+  };
+
+  const isSpecificCategoryCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    const category =
+      getCategoryFromText(text);
+
+    if (!category) {
+      return false;
+    }
+
+    return (
+      normalized.includes("how much") ||
+      normalized.includes("how much did") ||
+      normalized.includes("how much have") ||
+      normalized.includes("what did i spend") ||
+      normalized.includes("spend on") ||
+      normalized.includes("spent on") ||
+      normalized.includes("spending on") ||
+      normalized.includes("transactions for") ||
+      normalized.includes("transactions on") ||
+      normalized.includes("show my")
+    );
+  };
+
+  const getSpecificCategoryResponse = (text) => {
+    const category =
+      getCategoryFromText(text);
+
+    if (!category) {
+      return null;
+    }
+
+    const matchingTransactions =
+      transactions.filter(
+        (transaction) =>
+          isExpenseTransaction(transaction) &&
+          !isInternalTransfer(transaction) &&
+          getSpendingCategory(transaction) ===
+            category
+      );
+
+    const total =
+      matchingTransactions.reduce(
+        (sum, transaction) =>
+          sum +
+          getTransactionAmount(transaction),
+        0
+      );
+
+    if (!matchingTransactions.length) {
+      return (
+        `📊 I Couldn't Find Any Recorded ${category} Spending Yet.`
+      );
+    }
+
+    return (
+      `💸 You Have Spent R ${formatMoney(
+        total
+      )} On ${category}.\n\n` +
+      `📋 Matching Transactions: ${matchingTransactions.length}`
+    );
+  };
+
+  // =========================================================
   // FINANCIAL HEALTH
   // =========================================================
 
@@ -672,44 +948,24 @@ export default function AIAssistant() {
       text.trim().toLowerCase();
 
     return (
-      normalized.includes(
-        "how am i doing financially"
-      ) ||
-      normalized.includes(
-        "how am i doing with my money"
-      ) ||
-      normalized.includes(
-        "financial health"
-      ) ||
-      normalized.includes(
-        "financial checkup"
-      ) ||
-      normalized.includes(
-        "money checkup"
-      ) ||
-      normalized.includes(
-        "managing my money"
-      ) ||
-      normalized.includes(
-        "am i managing my money"
-      ) ||
-      normalized.includes(
-        "financial situation"
-      ) ||
-      normalized.includes(
-        "financial score"
-      )
+      normalized.includes("how am i doing financially") ||
+      normalized.includes("how am i doing with my money") ||
+      normalized.includes("financial health") ||
+      normalized.includes("financial checkup") ||
+      normalized.includes("money checkup") ||
+      normalized.includes("managing my money") ||
+      normalized.includes("am i managing my money") ||
+      normalized.includes("financial situation") ||
+      normalized.includes("financial score")
     );
   };
 
   const getFinancialHealthResponse = () => {
-    const main = Number(
-      mainBalance || 0
-    );
+    const main =
+      Number(mainBalance || 0);
 
-    const savings = Number(
-      savingsBalance || 0
-    );
+    const savings =
+      Number(savingsBalance || 0);
 
     const total =
       main + savings;
@@ -737,9 +993,7 @@ export default function AIAssistant() {
 
     if (savingsPercentage >= 20) {
       score += 15;
-    } else if (
-      savingsPercentage >= 10
-    ) {
+    } else if (savingsPercentage >= 10) {
       score += 8;
     }
 
@@ -831,12 +1085,13 @@ export default function AIAssistant() {
             .trim()
             .replace(/[?.!,]+$/, "");
 
-        recipient = recipient
-          .replace(
-            /\s+(from|using|via)\s+(main|savings?|saving)\b.*$/i,
-            ""
-          )
-          .trim();
+        recipient =
+          recipient
+            .replace(
+              /\s+(from|using|via)\s+(main|savings?|saving)\b.*$/i,
+              ""
+            )
+            .trim();
 
         if (recipient) {
           return recipient;
@@ -894,6 +1149,974 @@ export default function AIAssistant() {
   };
 
   // =========================================================
+  // BENEFICIARY LIST
+  // =========================================================
+
+  const isBeneficiaryListCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      normalized.includes("show my beneficiaries") ||
+      normalized.includes("list my beneficiaries") ||
+      normalized.includes("my beneficiaries") ||
+      normalized.includes("beneficiary list") ||
+      normalized.includes("who can i pay") ||
+      normalized.includes("who can i transfer to")
+    );
+  };
+
+  const getBeneficiaryListResponse = () => {
+    if (
+      !Array.isArray(beneficiaries) ||
+      beneficiaries.length === 0
+    ) {
+      return (
+        "👤 You Don't Have Any Beneficiaries Saved Yet."
+      );
+    }
+
+    const lines =
+      beneficiaries
+        .map(
+          (beneficiary, index) => {
+            const name =
+              beneficiary?.name ??
+              beneficiary?.full_name ??
+              beneficiary?.beneficiary_name ??
+              `Beneficiary ${index + 1}`;
+
+            const accountNumber =
+              beneficiary?.account_number ??
+              beneficiary?.accountNumber ??
+              "";
+
+            const bank =
+              beneficiary?.bank ??
+              beneficiary?.bank_name ??
+              beneficiary?.bankName ??
+              "";
+
+            let line =
+              `• ${name}`;
+
+            if (bank) {
+              line += ` — ${bank}`;
+            }
+
+            if (accountNumber) {
+              line += ` — ${accountNumber}`;
+            }
+
+            return line;
+          }
+        )
+        .join("\n");
+
+    return (
+      `👤 Your Saved Beneficiaries:\n\n${lines}`
+    );
+  };
+
+  // =========================================================
+  // TRANSACTION SEARCH
+  // =========================================================
+
+  const isTransactionSearchCommand = (text) => {
+    const normalized =
+      String(text || "")
+        .trim()
+        .toLowerCase();
+
+    return (
+      normalized.includes("find my") ||
+      normalized.includes("find a transaction") ||
+      normalized.includes("find transaction") ||
+      normalized.includes("search my transactions") ||
+      normalized.includes("search transactions") ||
+      normalized.includes("show transaction for") ||
+      normalized.includes("show transactions for") ||
+      normalized.includes("show my transactions") ||
+      normalized.includes("show transactions") ||
+      normalized.includes("show my transaction") ||
+      normalized.includes("transaction with") ||
+      normalized.includes("transaction from") ||
+      normalized.includes("transaction to") ||
+      normalized.includes("find the") ||
+      normalized.includes("find r")
+    );
+  };
+
+  const getTransactionDateRange = (text) => {
+    const normalized =
+      String(text || "")
+        .trim()
+        .toLowerCase();
+
+    const now = new Date();
+
+    if (normalized.includes("today")) {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+
+      return { start, end };
+    }
+
+    if (normalized.includes("yesterday")) {
+      const start = new Date(now);
+
+      start.setDate(
+        start.getDate() - 1
+      );
+
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(start);
+
+      end.setHours(23, 59, 59, 999);
+
+      return { start, end };
+    }
+
+    if (normalized.includes("this week")) {
+      const start = new Date(now);
+      const day = start.getDay();
+
+      start.setDate(
+        start.getDate() - day
+      );
+
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(now);
+
+      end.setHours(23, 59, 59, 999);
+
+      return { start, end };
+    }
+
+    if (normalized.includes("last week")) {
+      const start = new Date(now);
+      const day = start.getDay();
+
+      start.setDate(
+        start.getDate() - day - 7
+      );
+
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(start);
+
+      end.setDate(
+        end.getDate() + 6
+      );
+
+      end.setHours(23, 59, 59, 999);
+
+      return { start, end };
+    }
+
+    if (normalized.includes("this month")) {
+      const start = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1
+      );
+
+      const end = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999
+      );
+
+      return { start, end };
+    }
+
+    if (normalized.includes("last month")) {
+      const start = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1
+      );
+
+      const end = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59,
+        999
+      );
+
+      return { start, end };
+    }
+
+    return null;
+  };
+
+  // =========================================================
+  // TRANSACTION SEARCH ENGINE
+  // =========================================================
+
+  const searchTransactions = (text) => {
+    if (!Array.isArray(transactions)) {
+      return [];
+    }
+
+    const normalized =
+      String(text || "")
+        .trim()
+        .toLowerCase();
+
+    const amount =
+      extractAmount(text);
+
+    const dateRange =
+      getTransactionDateRange(text);
+
+    let searchWords =
+      normalized.replace(
+        /\b(find my|find a transaction|find transaction|search my transactions|search transactions|show transaction for|show transactions for|show transactions|show transaction|transaction with|transaction from|transaction to|transactions with|transactions from|transactions to)\b/gi,
+        ""
+      );
+
+    searchWords =
+      searchWords
+        .replace(
+          /\br?\s*\d+(?:\.\d+)?\s*k?\b/gi,
+          ""
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const ignoredWords = [
+      "my",
+      "the",
+      "a",
+      "an",
+      "for",
+      "from",
+      "to",
+      "with",
+      "transaction",
+      "transactions",
+      "payment",
+      "payments",
+      "show",
+      "find",
+      "search",
+      "please",
+      "me",
+      "of",
+      "on",
+      "in",
+      "at",
+    ];
+
+    const keywords =
+      searchWords
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter(
+          (word) =>
+            word &&
+            !ignoredWords.includes(word)
+        );
+
+    const results =
+      transactions.filter(
+        (transaction) => {
+          const transactionAmount =
+            Math.abs(
+              getTransactionAmount(
+                transaction
+              )
+            );
+
+          const description =
+            getTransactionDescription(
+              transaction
+            ).toLowerCase();
+
+          const type =
+            getTransactionType(
+              transaction
+            ).toLowerCase();
+
+          const account =
+            getTransactionAccount(
+              transaction
+            ).toLowerCase();
+
+          const recipient =
+            String(
+              transaction?.recipient ??
+                transaction?.recipient_name ??
+                transaction?.beneficiary ??
+                transaction?.beneficiary_name ??
+                ""
+            ).toLowerCase();
+
+          const searchableText = [
+            description,
+            type,
+            account,
+            recipient,
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          if (
+            amount !== null &&
+            Math.abs(
+              transactionAmount - amount
+            ) >= 0.01
+          ) {
+            return false;
+          }
+
+          if (dateRange) {
+            const rawDate =
+              transaction?.created_at ??
+              transaction?.date ??
+              transaction?.timestamp ??
+              transaction?.createdAt;
+
+            if (!rawDate) {
+              return false;
+            }
+
+            const transactionDate =
+              new Date(rawDate);
+
+            if (
+              Number.isNaN(
+                transactionDate.getTime()
+              )
+            ) {
+              return false;
+            }
+
+            if (
+              transactionDate <
+                dateRange.start ||
+              transactionDate >
+                dateRange.end
+            ) {
+              return false;
+            }
+          }
+
+          if (keywords.length === 0) {
+            return (
+              amount !== null ||
+              dateRange !== null
+            );
+          }
+
+          return keywords.every(
+            (keyword) =>
+              searchableText.includes(
+                keyword
+              )
+          );
+        }
+      );
+
+    return results.slice(0, 10);
+  };
+
+  const getTransactionSearchResponse = (text) => {
+    const results =
+      searchTransactions(text);
+
+    if (!results.length) {
+      return (
+        "🔎 I Couldn't Find A Matching Transaction."
+      );
+    }
+
+    const lines =
+      results
+        .map(
+          (transaction) => {
+            const type =
+              getTransactionType(
+                transaction
+              ) || "Transaction";
+
+            const amount =
+              getTransactionAmount(
+                transaction
+              );
+
+            const description =
+              getTransactionDescription(
+                transaction
+              );
+
+            const account =
+              getTransactionAccount(
+                transaction
+              );
+
+            const date =
+              formatTransactionDate(
+                transaction
+              );
+
+            return (
+              `• ${type} — R ${formatMoney(
+                amount
+              )}` +
+              (
+                description
+                  ? ` — ${description}`
+                  : ""
+              ) +
+              (
+                account
+                  ? ` — ${account}`
+                  : ""
+              ) +
+              (
+                date
+                  ? ` — ${date}`
+                  : ""
+              )
+            );
+          }
+        )
+        .join("\n");
+
+    return (
+      `🔎 I Found ${results.length} Matching Transaction${
+        results.length === 1
+          ? ""
+          : "s"
+      }:\n\n${lines}`
+    );
+  };
+
+  // =========================================================
+  // ACCOUNT TRANSACTION SEARCH
+  // =========================================================
+
+  const isAccountTransactionCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    const mentionsAccount =
+      normalized.includes("main") ||
+      normalized.includes("savings") ||
+      normalized.includes("saving");
+
+    const mentionsTransaction =
+      normalized.includes("transaction") ||
+      normalized.includes("transactions") ||
+      normalized.includes("spending") ||
+      normalized.includes("spent") ||
+      normalized.includes("withdrawal") ||
+      normalized.includes("deposit");
+
+    return (
+      mentionsAccount &&
+      mentionsTransaction
+    );
+  };
+
+  const getAccountTransactionResponse = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    const accountType =
+      normalized.includes("saving")
+        ? "savings"
+        : "main";
+
+    const matching =
+      transactions.filter(
+        (transaction) => {
+          const account =
+            getTransactionAccount(
+              transaction
+            );
+
+          return (
+            account === accountType ||
+            account.includes(accountType)
+          );
+        }
+      );
+
+    if (!matching.length) {
+      return (
+        `📋 I Couldn't Find Any Transactions Recorded For Your ${
+          accountType === "savings"
+            ? "Savings"
+            : "Main Account"
+        }.`
+      );
+    }
+
+    const lines =
+      matching
+        .slice(0, 10)
+        .map(
+          (transaction) => {
+            const type =
+              getTransactionType(
+                transaction
+              ) || "Transaction";
+
+            const amount =
+              getTransactionAmount(
+                transaction
+              );
+
+            const description =
+              getTransactionDescription(
+                transaction
+              );
+
+            return (
+              `• ${type} — R ${formatMoney(
+                amount
+              )}` +
+              (
+                description
+                  ? ` — ${description}`
+                  : ""
+              )
+            );
+          }
+        )
+        .join("\n");
+
+    return (
+      `📋 Transactions From Your ${
+        accountType === "savings"
+          ? "Savings"
+          : "Main Account"
+      }:\n\n${lines}`
+    );
+  };
+
+  // =========================================================
+  // PERSON / RECIPIENT TRANSACTION HISTORY
+  // =========================================================
+
+  const isRecipientHistoryCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      normalized.includes("sent to") ||
+      normalized.includes("send to") ||
+      normalized.includes("transfers to") ||
+      normalized.includes("transfer to") ||
+      normalized.includes("paid") ||
+      normalized.includes("payments to")
+    );
+  };
+
+  const extractHistoryRecipient = (text) => {
+    const normalized =
+      text.trim();
+
+    const patterns = [
+      /\bsent\s+to\s+(.+)$/i,
+      /\bsend\s+to\s+(.+)$/i,
+      /\btransfers?\s+to\s+(.+)$/i,
+      /\bpaid\s+(.+)$/i,
+      /\bpayments?\s+to\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match =
+        normalized.match(pattern);
+
+      if (match?.[1]) {
+        return match[1]
+          .trim()
+          .replace(/[?.!,]+$/, "");
+      }
+    }
+
+    return null;
+  };
+
+  const getRecipientHistoryResponse = (text) => {
+    const recipient =
+      extractHistoryRecipient(text);
+
+    if (!recipient) {
+      return (
+        "👤 Please Tell Me The Person You Want Me To Look For.\n\n" +
+        "For Example: How Much Have I Sent To Amasi?"
+      );
+    }
+
+    const search =
+      recipient.toLowerCase();
+
+    const matching =
+      transactions.filter(
+        (transaction) => {
+          const description =
+            getTransactionDescription(
+              transaction
+            ).toLowerCase();
+
+          const transactionRecipient =
+            String(
+              transaction?.recipient ??
+                transaction?.recipient_name ??
+                transaction?.beneficiary ??
+                ""
+            ).toLowerCase();
+
+          return (
+            description.includes(search) ||
+            transactionRecipient.includes(search)
+          );
+        }
+      );
+
+    if (!matching.length) {
+      return (
+        `👤 I Couldn't Find Any Transactions Matching "${recipient}".`
+      );
+    }
+
+    const total =
+      matching.reduce(
+        (sum, transaction) =>
+          sum +
+          getTransactionAmount(
+            transaction
+          ),
+        0
+      );
+
+    return (
+      `👤 I Found ${matching.length} Transaction${
+        matching.length === 1
+          ? ""
+          : "s"
+      } Matching "${recipient}".\n\n` +
+      `💸 Total Amount: R ${formatMoney(
+        total
+      )}\n\n` +
+      matching
+        .slice(0, 5)
+        .map(
+          (transaction) =>
+            `• R ${formatMoney(
+              getTransactionAmount(
+                transaction
+              )
+            )} — ${
+              getTransactionDescription(
+                transaction
+              ) || "Transfer"
+            }`
+        )
+        .join("\n")
+    );
+  };
+
+  // =========================================================
+  // MONTH COMPARISON
+  // =========================================================
+
+  const isMonthComparisonCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      normalized.includes("compare this month") ||
+      normalized.includes("compared to last month") ||
+      normalized.includes("compare my spending") ||
+      normalized.includes("spending compared") ||
+      normalized.includes("this month vs last month") ||
+      normalized.includes("this month versus last month")
+    );
+  };
+
+  const getMonthComparisonResponse = () => {
+    const current =
+      getCurrentMonthSpending();
+
+    const previous =
+      getPreviousMonthSpending();
+
+    const difference =
+      current - previous;
+
+    if (previous === 0) {
+      return (
+        `📊 This Month: R ${formatMoney(
+          current
+        )}\n` +
+        `📅 Last Month: R 0.00\n\n` +
+        `There Isn't Enough Previous-Month Spending Data To Calculate A Meaningful Comparison.`
+      );
+    }
+
+    const percentage =
+      Math.abs(
+        difference / previous
+      ) * 100;
+
+    if (difference > 0) {
+      return (
+        `📊 Spending Comparison:\n\n` +
+        `📅 This Month: R ${formatMoney(
+          current
+        )}\n` +
+        `📅 Last Month: R ${formatMoney(
+          previous
+        )}\n\n` +
+        `📈 Difference: R ${formatMoney(
+          difference
+        )}\n` +
+        `📊 Change: ${percentage.toFixed(
+          1
+        )}% Higher Than Last Month.`
+      );
+    }
+
+    if (difference < 0) {
+      return (
+        `📊 Spending Comparison:\n\n` +
+        `📅 This Month: R ${formatMoney(
+          current
+        )}\n` +
+        `📅 Last Month: R ${formatMoney(
+          previous
+        )}\n\n` +
+        `📉 Difference: R ${formatMoney(
+          Math.abs(difference)
+        )}\n` +
+        `📊 Change: ${percentage.toFixed(
+          1
+        )}% Lower Than Last Month.`
+      );
+    }
+
+    return (
+      `📊 Your Spending Is The Same As Last Month.\n\n` +
+      `This Month: R ${formatMoney(
+        current
+      )}\n` +
+      `Last Month: R ${formatMoney(
+        previous
+      )}`
+    );
+  };
+
+  // =========================================================
+  // PAYMENT INTENTS
+  // =========================================================
+
+  const isAirtimeCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      normalized.includes("airtime") &&
+      (
+        normalized.includes("buy") ||
+        normalized.includes("get") ||
+        normalized.includes("need") ||
+        normalized.includes("purchase") ||
+        normalized.includes("top up") ||
+        normalized.includes("topup") ||
+        normalized.includes("recharge") ||
+        normalized.includes("can you")
+      )
+    );
+  };
+
+  const isElectricityCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      normalized.includes("electricity") &&
+      (
+        normalized.includes("buy") ||
+        normalized.includes("get") ||
+        normalized.includes("need") ||
+        normalized.includes("purchase") ||
+        normalized.includes("pay") ||
+        normalized.includes("can you")
+      )
+    );
+  };
+
+  const isBillPaymentCommand = (text) => {
+    const normalized =
+      text.trim().toLowerCase();
+
+    return (
+      (
+        normalized.includes("pay my bill") ||
+        normalized.includes("pay my bills") ||
+        normalized.includes("pay bill") ||
+        normalized.includes("pay bills") ||
+        normalized.includes("pay a bill") ||
+        normalized.includes("need to pay a bill") ||
+        normalized.includes("need to pay my bill") ||
+        normalized.includes("can you pay my bill") ||
+        normalized.includes("can you pay my bills")
+      )
+    );
+  };
+
+  // =========================================================
+  // PAYMENT RESPONSES
+  // =========================================================
+
+  const getAirtimeResponse = (text) => {
+    const amount =
+      extractAmount(text);
+
+    if (!amount) {
+      return (
+        "📱 Sure! How Much Airtime Would You Like To Buy?\n\n" +
+        "For Example: Buy Me R50 Airtime."
+      );
+    }
+
+    if (amount > Number(mainBalance || 0)) {
+      return (
+        `❌ You Don't Have Enough Money In Your Main Account.\n\n` +
+        `💳 Available: R ${formatMoney(
+          mainBalance
+        )}\n` +
+        `📱 Airtime: R ${formatMoney(
+          amount
+        )}\n` +
+        `⚠️ Short By: R ${formatMoney(
+          amount - Number(mainBalance || 0)
+        )}.`
+      );
+    }
+
+    setPendingAirtime({
+      amount,
+    });
+
+    return (
+      `📱 I Found An Airtime Purchase Request For R ${formatMoney(
+        amount
+      )}.\n\n` +
+      `💳 Payment Will Come From Your Main Account.\n` +
+      `💰 Balance After Purchase: R ${formatMoney(
+        Number(mainBalance || 0) - amount
+      )}\n\n` +
+      `I Still Need Your Network And Mobile Number Before I Can Process It.\n\n` +
+      `Example: MTN 0721234567`
+    );
+  };
+
+  const getElectricityResponse = (text) => {
+    const amount =
+      extractAmount(text);
+
+    if (!amount) {
+      return (
+        "⚡ Sure! How Much Electricity Would You Like To Buy?\n\n" +
+        "For Example: Buy R200 Electricity."
+      );
+    }
+
+    if (amount > Number(mainBalance || 0)) {
+      return (
+        `❌ You Don't Have Enough Money In Your Main Account.\n\n` +
+        `💳 Available: R ${formatMoney(
+          mainBalance
+        )}\n` +
+        `⚡ Electricity: R ${formatMoney(
+          amount
+        )}\n` +
+        `⚠️ Short By: R ${formatMoney(
+          amount - Number(mainBalance || 0)
+        )}.`
+      );
+    }
+
+    setPendingElectricity({
+      amount,
+    });
+
+    return (
+      `⚡ I Found An Electricity Purchase Request For R ${formatMoney(
+        amount
+      )}.\n\n` +
+      `💳 Payment Will Come From Your Main Account.\n` +
+      `💰 Balance After Purchase: R ${formatMoney(
+        Number(mainBalance || 0) - amount
+      )}\n\n` +
+      `I Need Your Electricity Meter Number Before I Can Process It.\n\n` +
+      `Example: 12345678901`
+    );
+  };
+
+  const getBillPaymentResponse = (text) => {
+    const amount =
+      extractAmount(text);
+
+    if (!amount) {
+      return (
+        "📄 Sure! How Much Would You Like To Pay?\n\n" +
+        "For Example: Pay My R500 Bill."
+      );
+    }
+
+    if (amount > Number(mainBalance || 0)) {
+      return (
+        `❌ You Don't Have Enough Money In Your Main Account.\n\n` +
+        `💳 Available: R ${formatMoney(
+          mainBalance
+        )}\n` +
+        `📄 Bill: R ${formatMoney(
+          amount
+        )}\n` +
+        `⚠️ Short By: R ${formatMoney(
+          amount - Number(mainBalance || 0)
+        )}.`
+      );
+    }
+
+    setPendingBill({
+      amount,
+    });
+
+    return (
+      `📄 I Found A Bill Payment Request For R ${formatMoney(
+        amount
+      )}.\n\n` +
+      `💳 Payment Will Come From Your Main Account.\n` +
+      `💰 Balance After Payment: R ${formatMoney(
+        Number(mainBalance || 0) - amount
+      )}\n\n` +
+      `I Need The Bill Type And Reference Number Before I Can Process It.\n\n` +
+      `Example: DSTV 123456789`
+    );
+  };
+
+  // =========================================================
   // TRANSFER COMMAND
   // =========================================================
 
@@ -937,18 +2160,11 @@ export default function AIAssistant() {
         normalized
       );
 
-    // =======================================================
-    // SAVINGS -> MAIN
-    // =======================================================
-
     if (
       hasSavings &&
       hasMain &&
       (
         /from\s+(?:my\s+)?savings?\b.*to\s+(?:my\s+)?main\b/i.test(
-          normalized
-        ) ||
-        /from\s+(?:my\s+)?saving\b.*to\s+(?:my\s+)?main\b/i.test(
           normalized
         ) ||
         /\bsavings?\s+to\s+main\b/i.test(
@@ -964,10 +2180,6 @@ export default function AIAssistant() {
         direction: "to_main",
       };
     }
-
-    // =======================================================
-    // MAIN -> SAVINGS
-    // =======================================================
 
     if (
       hasSavings &&
@@ -995,10 +2207,6 @@ export default function AIAssistant() {
       };
     }
 
-    // =======================================================
-    // MOVE TO SAVINGS WITHOUT EXPLICIT SOURCE
-    // =======================================================
-
     if (
       !hasMain &&
       /\b(?:to|into)\s+(?:my\s+)?savings?\b/i.test(
@@ -1010,10 +2218,6 @@ export default function AIAssistant() {
         direction: "to_savings",
       };
     }
-
-    // =======================================================
-    // MOVE TO MAIN WITHOUT EXPLICIT SOURCE
-    // =======================================================
 
     if (
       !hasSavings &&
@@ -1030,6 +2234,155 @@ export default function AIAssistant() {
     return null;
   };
 
+    // =========================================================
+  // PAYMENT DETAIL EXTRACTION
+  // =========================================================
+const extractAirtimeDetails = (text) => {
+  const normalized = String(text || "")
+    .trim()
+    .toLowerCase();
+
+  // Recognize network names and common voice transcription mistakes.
+  const networkAliases = [
+    {
+      network: "vodacom",
+      aliases: [
+        "vodacom",
+        "vodakum",
+        "vodacom",
+        "voda com",
+        "vodacome",
+        "vodacom network",
+      ],
+    },
+    {
+      network: "mtn",
+      aliases: [
+        "mtn",
+        "em t n",
+        "emt en",
+        "empty en",
+        "mt n",
+        "m t n",
+        "emten",
+      ],
+    },
+    {
+      network: "telkom",
+      aliases: [
+        "telkom",
+        "telecom",
+        "tell com",
+        "tel com",
+        "telkom network",
+      ],
+    },
+    {
+      network: "cellc",
+      aliases: [
+        "cellc",
+        "cell c",
+        "cell see",
+        "cell sea",
+        "sell c",
+        "sell see",
+      ],
+    },
+  ];
+
+  let network = null;
+
+  for (const item of networkAliases) {
+    const matched = item.aliases.some((alias) => {
+      const escapedAlias = alias.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      const pattern = new RegExp(
+        `\\b${escapedAlias}\\b`,
+        "i"
+      );
+
+      return pattern.test(normalized);
+    });
+
+    if (matched) {
+      network = item.network;
+      break;
+    }
+  }
+
+  // Recognize South African mobile numbers.
+  const phoneMatch = normalized.match(
+    /(?:\+27\s?\d{2}|0\d{2})[\s-]?\d{3}[\s-]?\d{4}\b/
+  );
+
+  let mobileNumber = null;
+
+  if (phoneMatch) {
+    mobileNumber = phoneMatch[0].replace(/[\s-]/g, "");
+
+    if (mobileNumber.startsWith("+27")) {
+      mobileNumber = "0" + mobileNumber.slice(3);
+    }
+  }
+
+  return { network, mobileNumber };
+};
+
+  const extractMeterNumber = (text) => {
+    const normalized = String(text || "")
+      .trim();
+
+    const match = normalized.match(
+      /\b\d{8,13}\b/
+    );
+
+    return match
+      ? match[0]
+      : null;
+  };
+
+  const extractBillDetails = (text) => {
+    const normalized = String(text || "")
+      .trim()
+      .toLowerCase();
+
+    let billType = null;
+
+    if (normalized.includes("water")) {
+      billType = "water";
+    } else if (
+      normalized.includes("municipality") ||
+      normalized.includes("municipal")
+    ) {
+      billType = "municipality";
+    } else if (
+      normalized.includes("internet") ||
+      normalized.includes("wifi") ||
+      normalized.includes("wi-fi")
+    ) {
+      billType = "internet";
+    } else if (
+      normalized.includes("insurance")
+    ) {
+      billType = "insurance";
+    } else {
+      billType = "other";
+    }
+
+    const accountMatch = normalized.match(
+      /\b\d{6,16}\b/
+    );
+
+    return {
+      billType,
+      billAccount: accountMatch
+        ? accountMatch[0]
+        : null,
+    };
+  };
   // =========================================================
   // DEPOSIT COMMAND
   // =========================================================
@@ -1058,9 +2411,6 @@ export default function AIAssistant() {
 
     if (
       /\b(?:into|to|in)\s+(?:my\s+)?savings?\b/i.test(
-        normalized
-      ) ||
-      /\b(?:into|to|in)\s+(?:my\s+)?saving\b/i.test(
         normalized
       )
     ) {
@@ -1091,13 +2441,10 @@ export default function AIAssistant() {
       text.trim().toLowerCase();
 
     const isSavingsWithdrawal =
-      /\bfrom\s+(?:my\s+)?saving(?:s)?(?:\s+account)?\b/i.test(
+      /\bfrom\s+(?:my\s+)?savings?\b/i.test(
         normalized
       ) ||
       /\bfrom\s+(?:my\s+)?saving\b/i.test(
-        normalized
-      ) ||
-      /\bfrom\s+savings\b/i.test(
         normalized
       );
 
@@ -1372,6 +2719,30 @@ export default function AIAssistant() {
       text.trim().toLowerCase();
 
     // =======================================================
+    // AIRTIME
+    // =======================================================
+
+    if (isAirtimeCommand(text)) {
+      return getAirtimeResponse(text);
+    }
+
+    // =======================================================
+    // ELECTRICITY
+    // =======================================================
+
+    if (isElectricityCommand(text)) {
+      return getElectricityResponse(text);
+    }
+
+    // =======================================================
+    // BILLS
+    // =======================================================
+
+    if (isBillPaymentCommand(text)) {
+      return getBillPaymentResponse(text);
+    }
+
+    // =======================================================
     // WITHDRAWAL
     // =======================================================
 
@@ -1484,10 +2855,6 @@ export default function AIAssistant() {
         direction,
       } = interAccountTransfer;
 
-      // Backend accepts exactly:
-      // "to_savings"
-      // "to_main"
-
       const isMainToSavings =
         direction === "to_savings";
 
@@ -1553,6 +2920,28 @@ export default function AIAssistant() {
     }
 
     // =======================================================
+    // MONTH COMPARISON
+    // =======================================================
+
+    if (
+      isMonthComparisonCommand(text)
+    ) {
+      return getMonthComparisonResponse();
+    }
+
+    // =======================================================
+    // SPECIFIC CATEGORY
+    // =======================================================
+
+    if (
+      isSpecificCategoryCommand(text)
+    ) {
+      return getSpecificCategoryResponse(
+        text
+      );
+    }
+
+    // =======================================================
     // SPENDING CATEGORY
     // =======================================================
 
@@ -1570,6 +2959,52 @@ export default function AIAssistant() {
       isFinancialHealthCommand(text)
     ) {
       return getFinancialHealthResponse();
+    }
+
+    // =======================================================
+    // BENEFICIARY LIST
+    // =======================================================
+
+    if (
+      isBeneficiaryListCommand(text)
+    ) {
+      return getBeneficiaryListResponse();
+    }
+
+    // =======================================================
+    // ACCOUNT TRANSACTIONS
+    // =======================================================
+
+    if (
+      isAccountTransactionCommand(text)
+    ) {
+      return getAccountTransactionResponse(
+        text
+      );
+    }
+
+    // =======================================================
+    // RECIPIENT HISTORY
+    // =======================================================
+
+    if (
+      isRecipientHistoryCommand(text)
+    ) {
+      return getRecipientHistoryResponse(
+        text
+      );
+    }
+
+    // =======================================================
+    // TRANSACTION SEARCH
+    // =======================================================
+
+    if (
+      isTransactionSearchCommand(text)
+    ) {
+      return getTransactionSearchResponse(
+        text
+      );
     }
 
     // =======================================================
@@ -1669,28 +3104,27 @@ export default function AIAssistant() {
       normalized === "hi" ||
       normalized === "hello" ||
       normalized === "hey" ||
-      normalized.includes(
-        "good morning"
-      ) ||
-      normalized.includes(
-        "good afternoon"
-      ) ||
-      normalized.includes(
-        "good evening"
-      )
+      normalized.includes("good morning") ||
+      normalized.includes("good afternoon") ||
+      normalized.includes("good evening")
     ) {
       return (
         "👋 Hello! I'm Your Baseline Bank AI Assistant.\n\n" +
         "I Can Help You With:\n" +
         "💳 Balances\n" +
-        "💰 Savings\n" +
+        "🏦 Savings\n" +
         "💸 Spending\n" +
         "📊 Spending Categories\n" +
         "📈 Financial Health\n" +
         "🔄 Transfers\n" +
         "💵 Deposits\n" +
         "🏧 Withdrawals\n" +
-        "📋 Transactions\n\n" +
+        "📋 Transactions\n" +
+        "👤 Beneficiaries\n" +
+        "📱 Airtime\n" +
+        "⚡ Electricity\n" +
+        "📄 Bills\n" +
+        "🔎 Transaction Search\n\n" +
         "What Would You Like To Know?"
       );
     }
@@ -1700,18 +3134,10 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "total balance"
-      ) ||
-      normalized.includes(
-        "combined balance"
-      ) ||
-      normalized.includes(
-        "overall balance"
-      ) ||
-      normalized.includes(
-        "how much money do i have total"
-      )
+      normalized.includes("total balance") ||
+      normalized.includes("combined balance") ||
+      normalized.includes("overall balance") ||
+      normalized.includes("how much money do i have total")
     ) {
       const total =
         Number(mainBalance || 0) +
@@ -1737,22 +3163,13 @@ export default function AIAssistant() {
     if (
       normalized === "savings" ||
       normalized === "saving" ||
-      normalized.includes(
-        "savings balance"
-      ) ||
-      normalized.includes(
-        "saving balance"
-      ) ||
-      normalized.includes(
-        "how much is in savings"
-      ) ||
-      normalized.includes(
-        "how much is in my savings"
-      ) ||
-      normalized.includes(
-        "money in savings"
-      )
-    ) {
+      normalized.includes("savings balance") ||
+      normalized.includes("saving balance") ||
+      normalized.includes("how much is in savings") ||
+      normalized.includes("how much is in my savings") ||
+      normalized.includes("money in savings")||
+      normalized.includes("how much do i have")
+ ) {
       return (
         `🏦 Your Current Savings Balance Is R ${formatMoney(
           savingsBalance
@@ -1761,69 +3178,55 @@ export default function AIAssistant() {
     }
 
     // =======================================================
-    // MAIN BALANCE
-    // =======================================================
+// MAIN BALANCE
+// =======================================================
 
-    if (
-      normalized === "balance" ||
-      normalized.includes(
-        "main balance"
-      ) ||
-      normalized.includes(
-        "current balance"
-      ) ||
-      normalized.includes(
-        "bank balance"
-      ) ||
-      normalized.includes(
-        "account balance"
-      ) ||
-      normalized.includes(
-        "what's my balance"
-      ) ||
-      normalized.includes(
-        "what is my balance"
-      ) ||
-      normalized.includes(
-        "whats my balance"
-      ) ||
-      normalized.includes(
-        "how much do i have"
-      ) ||
-      normalized.includes(
-        "how much money do i have"
-      ) ||
-      normalized.includes(
-        "how much is in my account"
-      ) ||
-      normalized.includes(
-        "how much do i currently have"
-      )
-    ) {
-      return (
-        `💳 Your Current Main Account Balance Is R ${formatMoney(
-          mainBalance
-        )}.`
-      );
-    }
+if (
+  normalized === "balance" ||
+  normalized.includes("main balance") ||
+  normalized.includes("current balance") ||
+  normalized.includes("bank balance") ||
+  normalized.includes("account balance") ||
+  normalized.includes("what's my balance") ||
+  normalized.includes("what is my balance") ||
+  normalized.includes("whats my balance") ||
+  (
+    normalized.includes("how much do i have") &&
+    !normalized.includes("savings") &&
+    !normalized.includes("saving")
+  ) ||
+  (
+    normalized.includes("how much money do i have") &&
+    !normalized.includes("savings") &&
+    !normalized.includes("saving")
+  ) ||
+  (
+    normalized.includes("how much is in my account") &&
+    !normalized.includes("savings") &&
+    !normalized.includes("saving")
+  ) ||
+  (
+    normalized.includes("how much do i currently have") &&
+    !normalized.includes("savings") &&
+    !normalized.includes("saving")
+  )
+) {
+  return (
+    `💳 Your Current Main Account Balance Is R ${formatMoney(
+      mainBalance
+    )}.`
+  );
+}
 
     // =======================================================
     // MONTHLY SPENDING
     // =======================================================
 
     if (
-      normalized.includes(
-        "spent this month"
-      ) ||
-      normalized.includes(
-        "spending this month"
-      ) ||
-      normalized.includes(
-        "monthly spending"
-      ) ||
-      normalized.includes(
-        "how much did i spend"
-      )
+      normalized.includes("spent this month") ||
+      normalized.includes("spending this month") ||
+      normalized.includes("monthly spending") ||
+      normalized.includes("how much did i spend")
     ) {
       const spending =
         getCurrentMonthSpending();
@@ -1840,15 +3243,9 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "biggest expense"
-      ) ||
-      normalized.includes(
-        "largest expense"
-      ) ||
-      normalized.includes(
-        "most expensive transaction"
-      )
+      normalized.includes("biggest expense") ||
+      normalized.includes("largest expense") ||
+      normalized.includes("most expensive transaction")
     ) {
       const biggest =
         getBiggestExpense();
@@ -1876,15 +3273,9 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "total spending"
-      ) ||
-      normalized.includes(
-        "how much have i spent"
-      ) ||
-      normalized.includes(
-        "how much money have i spent"
-      )
+      normalized.includes("total spending") ||
+      normalized.includes("how much have i spent") ||
+      normalized.includes("how much money have i spent")
     ) {
       const spending =
         getTotalSpending();
@@ -1901,18 +3292,10 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "total income"
-      ) ||
-      normalized.includes(
-        "how much have i earned"
-      ) ||
-      normalized.includes(
-        "how much money have i received"
-      ) ||
-      normalized.includes(
-        "my income"
-      )
+      normalized.includes("total income") ||
+      normalized.includes("how much have i earned") ||
+      normalized.includes("how much money have i received") ||
+      normalized.includes("my income")
     ) {
       const income =
         getTotalIncome();
@@ -1929,21 +3312,11 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "recent transactions"
-      ) ||
-      normalized.includes(
-        "latest transactions"
-      ) ||
-      normalized.includes(
-        "show my transactions"
-      ) ||
-      normalized.includes(
-        "show transactions"
-      ) ||
-      normalized.includes(
-        "my transactions"
-      )
+      normalized.includes("recent transactions") ||
+      normalized.includes("latest transactions") ||
+      normalized.includes("show my transactions") ||
+      normalized.includes("show transactions") ||
+      normalized.includes("my transactions")
     ) {
       if (
         !Array.isArray(transactions) ||
@@ -1997,18 +3370,10 @@ export default function AIAssistant() {
     // =======================================================
 
     if (
-      normalized.includes(
-        "financial summary"
-      ) ||
-      normalized.includes(
-        "money summary"
-      ) ||
-      normalized.includes(
-        "give me a summary"
-      ) ||
-      normalized.includes(
-        "account summary"
-      )
+      normalized.includes("financial summary") ||
+      normalized.includes("money summary") ||
+      normalized.includes("give me a summary") ||
+      normalized.includes("account summary")
     ) {
       const total =
         Number(mainBalance || 0) +
@@ -2046,12 +3411,8 @@ export default function AIAssistant() {
 
     if (
       normalized === "help" ||
-      normalized.includes(
-        "what can you do"
-      ) ||
-      normalized.includes(
-        "how can you help"
-      )
+      normalized.includes("what can you do") ||
+      normalized.includes("how can you help")
     ) {
       return (
         "🤖 Here's What I Can Do:\n\n" +
@@ -2063,39 +3424,290 @@ export default function AIAssistant() {
         "🧠 Check Your Financial Health\n" +
         "💵 Check Your Income\n" +
         "📋 Show Recent Transactions\n" +
+        "🔎 Search Transactions\n" +
+        "👤 Search Recipient History\n" +
+        "👥 Show Beneficiaries\n" +
+        "📅 Compare Monthly Spending\n" +
         "💸 Withdraw Money\n" +
         "💰 Deposit Money\n" +
         "🔄 Move Money Between Main And Savings\n" +
         "👤 Send Money To Beneficiaries\n" +
+        "📱 Buy Airtime\n" +
+        "⚡ Buy Electricity\n" +
+        "📄 Pay Bills\n" +
         "💡 Check Whether You Can Afford Something\n\n" +
-        "Try: \"Can I Afford R1,000?\""
+        "Try:\n" +
+        "• \"Buy Me R50 Airtime\"\n" +
+        "• \"Buy R200 Electricity\"\n" +
+        "• \"Pay My R500 Bill\"\n" +
+        "• \"Can I Afford R1,000?\"\n" +
+        "• \"How Much Did I Spend On Airtime?\"\n" +
+        "• \"How Much Have I Sent To Amasi?\"\n" +
+        "• \"Compare This Month To Last Month\"\n" +
+        "• \"Show My Beneficiaries\""
       );
     }
 
     // =======================================================
     // DEFAULT RESPONSE
     // =======================================================
-
     return (
       "🤖 I'm Not Quite Sure What You Mean Yet.\n\n" +
       "Try Asking Me Something Like:\n" +
       "• What's My Balance?\n" +
       "• How Much Is In Savings?\n" +
+      "• Buy Me R50 Airtime\n" +
+      "• Buy R200 Electricity\n" +
+      "• Pay My R500 Bill\n" +
       "• Can I Afford R1,000?\n" +
       "• Where Am I Spending Most?\n" +
-      "• How Am I Doing Financially?\n" +
-      "• How Much Did I Spend This Month?\n" +
+      "• How Much Did I Spend On Airtime?\n" +
+      "• How Much Have I Sent To Amasi?\n" +
+      "• Compare This Month To Last Month\n" +
+      "• Show My Beneficiaries\n" +
       "• Show My Recent Transactions"
     );
   };
+// =========================================================
+// EXECUTE AI AIRTIME
+// =========================================================
+
+const executeAIAirtime = async (
+  payment
+) => {
+  try {
+    setThinking(true);
+
+    await API.post(
+      "buy-airtime/",
+      {
+        mobile_number:
+          payment.mobileNumber,
+        network:
+          payment.network,
+        amount:
+          payment.amount,
+      }
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          `✅ Airtime Purchase Successful!\n\n` +
+          `📱 Network: ${payment.network.toUpperCase()}\n` +
+          `📞 Number: ${payment.mobileNumber}\n` +
+          `💰 Amount: R ${formatMoney(
+            payment.amount
+          )}\n` +
+          `💳 Payment From: Main Account\n\n` +
+          `Your Airtime Purchase Has Been Completed Successfully.`,
+      },
+    ]);
+
+    setPendingAirtime(null);
+
+    await fetchBankData();
+  } catch (error) {
+    console.error(
+      "AI AIRTIME ERROR:",
+      error?.response?.data ||
+        error?.message ||
+        error
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          "❌ I Couldn't Complete The Airtime Purchase. " +
+          (
+            error?.response?.data?.detail ||
+            error?.response?.data?.error ||
+            "Please Check Your Balance And Airtime Details."
+          ),
+      },
+    ]);
+  } finally {
+    setThinking(false);
+  }
+};
+
+
+const executeAIElectricity = async (
+  payment
+) => {
+  try {
+    setThinking(true);
+
+    await API.post(
+      "buy-electricity/",
+      {
+        meter_number:
+          payment.meterNumber,
+        provider:
+          payment.provider,
+        amount:
+          payment.amount,
+      }
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          `✅ Electricity Purchase Successful!\n\n` +
+          `⚡ Provider: ${
+            payment.provider
+              ? payment.provider.toUpperCase()
+              : "ELECTRICITY"
+          }\n` +
+          `🔢 Meter Number: ${payment.meterNumber}\n` +
+          `💰 Amount: R ${formatMoney(
+            payment.amount
+          )}\n` +
+          `💳 Payment From: Main Account\n\n` +
+          `Your Electricity Purchase Has Been Completed Successfully.`,
+      },
+    ]);
+
+    setPendingElectricity(null);
+
+    await fetchBankData();
+  } catch (error) {
+    console.error(
+      "AI ELECTRICITY ERROR:",
+      error?.response?.data ||
+        error?.message ||
+        error
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          "❌ I Couldn't Complete The Electricity Purchase. " +
+          (
+            error?.response?.data?.detail ||
+            error?.response?.data?.error ||
+            "Please Check Your Balance And Electricity Details."
+          ),
+      },
+    ]);
+  } finally {
+    setThinking(false);
+  }
+};
+
+
+const executeAIBill = async (
+  payment
+) => {
+  try {
+    setThinking(true);
+
+    await API.post(
+      "pay-bill/",
+      {
+        bill_type:
+          payment.billType,
+        bill_account:
+          payment.billAccount,
+        amount:
+          payment.amount,
+      }
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          `✅ Bill Payment Successful!\n\n` +
+          `📄 Bill Type: ${
+            payment.billType
+              ? payment.billType.toUpperCase()
+              : "BILL"
+          }\n` +
+          `🔢 Reference: ${payment.billAccount}\n` +
+          `💰 Amount: R ${formatMoney(
+            payment.amount
+          )}\n` +
+          `💳 Payment From: Main Account\n\n` +
+          `Your Bill Has Been Paid Successfully.`,
+      },
+    ]);
+
+    setPendingBill(null);
+
+    await fetchBankData();
+  } catch (error) {
+    console.error(
+      "AI BILL PAYMENT ERROR:",
+      error?.response?.data ||
+        error?.message ||
+        error
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          "❌ I Couldn't Complete The Bill Payment. " +
+          (
+            error?.response?.data?.detail ||
+            error?.response?.data?.error ||
+            "Please Check Your Balance And Bill Details."
+          ),
+      },
+    ]);
+  } finally {
+    setThinking(false);
+  }
+};
+const handleVoiceInput = () => {
+  if (!speechSupported) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "ai",
+        text:
+          "🎤 Voice Input Is Not Supported By This Browser. Please Try Google Chrome.",
+      },
+    ]);
+
+    return;
+  }
+
+  if (!recognitionRef.current) {
+    return;
+  }
+
+  // Stop listening if the microphone is already active
+  if (isListening) {
+    recognitionRef.current.stop();
+    setIsListening(false);
+    return;
+  }
+
+  try {
+    recognitionRef.current.start();
+  } catch (error) {
+    console.error("VOICE START ERROR:", error);
+    setIsListening(false);
+  }
+};
 
   // =========================================================
   // HANDLE SUBMIT
   // =========================================================
 
-  const handleSubmit = async (
-    event
-  ) => {
+  const handleSubmit = async (event) => {
     event?.preventDefault();
 
     const text =
@@ -2126,87 +3738,229 @@ export default function AIAssistant() {
             .trim()
             .toLowerCase();
 
+
+                    // ===================================================
+        // AIRTIME DETAILS
         // ===================================================
-        // YES / CONFIRMATION
+
+        if (pendingAirtime) {
+          const details =
+            extractAirtimeDetails(text);
+
+          if (
+            details.network &&
+            details.mobileNumber
+          ) {
+            const updatedPayment = {
+              ...pendingAirtime,
+              network:
+                details.network,
+              mobileNumber:
+                details.mobileNumber,
+            };
+
+            setPendingAirtime(
+              updatedPayment
+            );
+
+            setMessages((prev) => [
+              ...prev,
+              {
+                sender: "ai",
+                text:
+                  `📱 Airtime Details Received!\n\n` +
+                  `📱 Network: ${details.network.toUpperCase()}\n` +
+                  `📞 Number: ${details.mobileNumber}\n` +
+                  `💰 Amount: R ${formatMoney(
+                    pendingAirtime.amount
+                  )}\n` +
+                  `💳 Payment From: Main Account\n\n` +
+                  `Would You Like Me To Proceed?`,
+              },
+            ]);
+
+            setThinking(false);
+            return;
+          }
+        }
+
+        // ===================================================
+        // ELECTRICITY DETAILS
+        // ===================================================
+
+        if (pendingElectricity) {
+          const meterNumber =
+            extractMeterNumber(text);
+
+          if (meterNumber) {
+            const updatedPayment = {
+              ...pendingElectricity,
+              meterNumber,
+            };
+
+            setPendingElectricity(
+              updatedPayment
+            );
+
+            setMessages((prev) => [
+              ...prev,
+              {
+                sender: "ai",
+                text:
+                  `⚡ Electricity Details Received!\n\n` +
+                  `🔢 Meter Number: ${meterNumber}\n` +
+                  `💰 Amount: R ${formatMoney(
+                    pendingElectricity.amount
+                  )}\n` +
+                  `💳 Payment From: Main Account\n\n` +
+                  `Would You Like Me To Proceed?`,
+              },
+            ]);
+
+            setThinking(false);
+            return;
+          }
+        }
+
+        // ===================================================
+        // BILL DETAILS
+        // ===================================================
+
+        if (pendingBill) {
+          const details =
+            extractBillDetails(text);
+
+          if (details.billAccount) {
+            const updatedPayment = {
+              ...pendingBill,
+              billType:
+                details.billType,
+              billAccount:
+                details.billAccount,
+            };
+
+            setPendingBill(
+              updatedPayment
+            );
+
+            setMessages((prev) => [
+              ...prev,
+              {
+                sender: "ai",
+                text:
+                  `📄 Bill Details Received!\n\n` +
+                  `📄 Bill Type: ${details.billType.toUpperCase()}\n` +
+                  `🔢 Reference: ${details.billAccount}\n` +
+                  `💰 Amount: R ${formatMoney(
+                    pendingBill.amount
+                  )}\n` +
+                  `💳 Payment From: Main Account\n\n` +
+                  `Would You Like Me To Proceed?`,
+              },
+            ]);
+
+            setThinking(false);
+            return;
+          }
+        }
+
+        // ===================================================
+        // YES
         // ===================================================
 
         const isYes =
           normalized === "yes" ||
           normalized === "y" ||
-          normalized.includes(
-            "yes please"
-          ) ||
-          normalized.includes(
-            "go ahead"
-          ) ||
-          normalized.includes(
-            "confirm"
-          );
+          normalized.includes("yes please") ||
+          normalized.includes("go ahead") ||
+          normalized.includes("confirm");
 
         // ===================================================
-        // NO / CANCELLATION
+        // NO
         // ===================================================
 
         const isNo =
           normalized === "no" ||
           normalized === "n" ||
-          normalized.includes(
-            "cancel"
-          ) ||
-          normalized.includes(
-            "stop"
-          );
+          normalized.includes("cancel") ||
+          normalized.includes("stop");
+
+// ===================================================
+// CONFIRM
+// ===================================================
+if (isYes) {
+  // 📱 AIRTIME
+  if (pendingAirtime) {
+    await executeAIAirtime(
+      pendingAirtime
+    );
+    return;
+  }
+
+  // ⚡ ELECTRICITY
+  if (pendingElectricity) {
+    await executeAIElectricity(
+      pendingElectricity
+    );
+    return;
+  }
+
+  // 📄 BILL PAYMENT
+  if (pendingBill) {
+    await executeAIBill(
+      pendingBill
+    );
+    return;
+  }
+
+  // 💸 WITHDRAWAL
+  if (pendingWithdrawal) {
+    await executeAIWithdrawal(
+      pendingWithdrawal
+    );
+    return;
+  }
+
+  // 💰 DEPOSIT
+  if (pendingDeposit) {
+    await executeAIDeposit(
+      pendingDeposit
+    );
+    return;
+  }
+
+  // 🔄 MAIN ↔ SAVINGS
+  if (pendingInterAccountTransfer) {
+    await executeAIInterAccountTransfer(
+      pendingInterAccountTransfer
+    );
+    return;
+  }
+
+  // 👤 BENEFICIARY TRANSFER
+  if (pendingTransfer) {
+    await executeAITransfer(
+      pendingTransfer
+    );
+    return;
+  }
+
+  setMessages((prev) => [
+    ...prev,
+    {
+      sender: "ai",
+      text:
+        "👍 There Is No Pending Banking Action Waiting For Confirmation.",
+    },
+  ]);
+
+  setThinking(false);
+  return;
+}
+
 
         // ===================================================
-        // CONFIRM PENDING ACTION
-        // ===================================================
-
-        if (isYes) {
-          if (pendingWithdrawal) {
-            await executeAIWithdrawal(
-              pendingWithdrawal
-            );
-            return;
-          }
-
-          if (pendingDeposit) {
-            await executeAIDeposit(
-              pendingDeposit
-            );
-            return;
-          }
-
-          if (
-            pendingInterAccountTransfer
-          ) {
-            await executeAIInterAccountTransfer(
-              pendingInterAccountTransfer
-            );
-            return;
-          }
-
-          if (pendingTransfer) {
-            await executeAITransfer(
-              pendingTransfer
-            );
-            return;
-          }
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              sender: "ai",
-              text:
-                "👍 There Is No Pending Banking Action Waiting For Confirmation.",
-            },
-          ]);
-
-          setThinking(false);
-          return;
-        }
-
-        // ===================================================
-        // CANCEL PENDING ACTION
+        // CANCEL
         // ===================================================
 
         if (isNo) {
@@ -2214,14 +3968,18 @@ export default function AIAssistant() {
             pendingWithdrawal ||
             pendingDeposit ||
             pendingInterAccountTransfer ||
-            pendingTransfer;
+            pendingTransfer ||
+            pendingAirtime ||
+            pendingElectricity ||
+            pendingBill;
 
           setPendingWithdrawal(null);
           setPendingDeposit(null);
-          setPendingInterAccountTransfer(
-            null
-          );
+          setPendingInterAccountTransfer(null);
           setPendingTransfer(null);
+          setPendingAirtime(null);
+          setPendingElectricity(null);
+          setPendingBill(null);
 
           setMessages((prev) => [
             ...prev,
@@ -2239,15 +3997,9 @@ export default function AIAssistant() {
 
         // ===================================================
         // NEW COMMAND
-        // Clear Previous Pending Actions
         // ===================================================
 
-        setPendingWithdrawal(null);
-        setPendingDeposit(null);
-        setPendingInterAccountTransfer(
-          null
-        );
-        setPendingTransfer(null);
+
 
         const response =
           generateAIResponse(text);
@@ -2286,11 +4038,17 @@ export default function AIAssistant() {
   const suggestions = [
     "What's My Balance?",
     "How Much Is In Savings?",
+    "Buy Me R50 Airtime",
+    "Buy R200 Electricity",
+    "Pay My R500 Bill",
     "Can I Afford R1,000?",
     "Where Am I Spending Most?",
     "How Am I Doing Financially?",
     "How Much Did I Spend This Month?",
     "Show My Recent Transactions",
+    "How Much Did I Spend On Airtime?",
+    "Compare This Month To Last Month",
+    "Show My Beneficiaries",
   ];
 
   const handleSuggestion = (
@@ -2329,9 +4087,7 @@ export default function AIAssistant() {
           padding: "30px 20px 50px",
         }}
       >
-        {/* ===================================================
-            HEADER
-        =================================================== */}
+        {/* HEADER */}
 
         <div
           style={{
@@ -2358,9 +4114,7 @@ export default function AIAssistant() {
           </p>
         </div>
 
-        {/* ===================================================
-            BALANCE CARDS
-        =================================================== */}
+        {/* BALANCE CARDS */}
 
         <div
           style={{
@@ -2465,9 +4219,7 @@ export default function AIAssistant() {
           </div>
         </div>
 
-        {/* ===================================================
-            CHAT CONTAINER
-        =================================================== */}
+        {/* CHAT CONTAINER */}
 
         <div
           style={{
@@ -2481,9 +4233,7 @@ export default function AIAssistant() {
               "0 20px 60px rgba(0,0,0,0.25)",
           }}
         >
-          {/* =================================================
-              CHAT MESSAGES
-          ================================================= */}
+          {/* CHAT MESSAGES */}
 
           <div
             style={{
@@ -2578,9 +4328,7 @@ export default function AIAssistant() {
             )}
           </div>
 
-          {/* =================================================
-              SUGGESTIONS
-          ================================================= */}
+          {/* SUGGESTIONS */}
 
           <div
             style={{
@@ -2624,81 +4372,89 @@ export default function AIAssistant() {
             )}
           </div>
 
-          {/* =================================================
-              INPUT
-          ================================================= */}
+          {/* INPUT */}
+<form
+  onSubmit={handleSubmit}
+  style={{
+    display: "flex",
+    gap: "10px",
+    alignItems: "center",
+  }}
+>
+  <input
+    type="text"
+    value={input}
+    onChange={(e) => setInput(e.target.value)}
+    placeholder={
+      isListening
+        ? "Listening..."
+        : "Ask Baseline Bank AI..."
+    }
+    disabled={thinking}
+    style={{
+      flex: 1,
+      padding: "14px 16px",
+      borderRadius: "12px",
+      border: "1px solid rgba(255,255,255,0.15)",
+      background: "rgba(255,255,255,0.08)",
+      color: "white",
+      outline: "none",
+      fontSize: "15px",
+    }}
+  />
 
-          <form
-            onSubmit={handleSubmit}
-            style={{
-              display: "flex",
-              gap: "10px",
-              padding: "18px 24px 24px",
-              borderTop:
-                "1px solid rgba(255,255,255,0.08)",
-            }}
-          >
-            <input
-              value={input}
-              onChange={(event) =>
-                setInput(
-                  event.target.value
-                )
-              }
-              placeholder="Ask Baseline AI..."
-              disabled={thinking}
-              style={{
-                flex: 1,
-                padding:
-                  "14px 16px",
-                borderRadius:
-                  "12px",
-                border:
-                  "1px solid rgba(255,255,255,0.12)",
-                background:
-                  "rgba(0,0,0,0.25)",
-                color:
-                  "#ffffff",
-                outline:
-                  "none",
-                fontSize:
-                  "15px",
-              }}
-            />
+  <button
+    type="button"
+    onClick={handleVoiceInput}
+    disabled={thinking}
+    title={
+      isListening
+        ? "Stop Listening"
+        : "Voice Input"
+    }
+    style={{
+      width: "50px",
+      height: "50px",
+      borderRadius: "12px",
+      border: "none",
+      cursor: thinking ? "not-allowed" : "pointer",
+      background: isListening
+        ? "#dc2626"
+        : "rgba(255,255,255,0.12)",
+      color: "white",
+      fontSize: "22px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      transition: "0.2s",
+    }}
+  >
+    {isListening ? "⏹️" : "🎤"}
+  </button>
 
-            <button
-              type="submit"
-              disabled={
-                thinking ||
-                !input.trim()
-              }
-              style={{
-                padding:
-                  "14px 22px",
-                borderRadius:
-                  "12px",
-                border: "none",
-                background:
-                  thinking ||
-                  !input.trim()
-                    ? "#475569"
-                    : "#2563eb",
-                color:
-                  "#ffffff",
-                fontWeight:
-                  "600",
-                cursor:
-                  thinking ||
-                  !input.trim()
-                    ? "not-allowed"
-                    : "pointer",
-              }}
-            >
-              {thinking
-                ? "..."
-                : "Send"}
-            </button>
-          </form>
+  <button
+    type="submit"
+    disabled={thinking || !input.trim()}
+    style={{
+      padding: "14px 20px",
+      borderRadius: "12px",
+      border: "none",
+      cursor:
+        thinking || !input.trim()
+          ? "not-allowed"
+          : "pointer",
+      background:
+        thinking || !input.trim()
+          ? "rgba(255,255,255,0.15)"
+          : "#2563eb",
+      color: "white",
+      fontWeight: "600",
+      fontSize: "15px",
+    }}
+  >
+    Send
+  </button>
+</form>
         </div>
       </div>
     </div>
